@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Visualizador de QR Code</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      img {
+        max-width: 100%;
+        border: 1px solid #ddd;
+      }
+      button {
+        padding: 10px 15px;
+        background: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Visualizador de QR Code WhatsApp</h1>
+    <button onclick="createSession()">Criar Nova Sessão</button>
+    <div id="result" style="margin-top: 20px"></div>
+
+    <script>
+      async function createSession() {
+        const result = document.getElementById('result');
+        result.innerHTML = 'Criando sessão...';
+
+        try {
+          const response = await fetch(
+            'http://localhost:3000/whatsapp/sessions',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: 'TesteSessao' }),
+            },
+          );
+
+          const data = await response.json();
+
+          if (data.success && data.qrCode) {
+            result.innerHTML = `
+                        <h3>Sessão criada com sucesso</h3>
+                        <p>Escaneie o QR Code com seu WhatsApp:</p>
+                        <img src="${data.qrCode}" alt="QR Code para WhatsApp">
+                    `;
+          } else {
+            result.innerHTML = `<p>Erro: ${data.error || 'Falha ao criar sessão'}</p>`;
+          }
+        } catch (error) {
+          result.innerHTML = `<p>Erro: ${error.message}</p>`;
+        }
+      }
+    </script>
+  </body>
+</html>
