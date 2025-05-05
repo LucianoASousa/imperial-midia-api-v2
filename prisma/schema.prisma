@@ -16,3 +16,43 @@ model User {
   email     String   @unique
   createdAt DateTime @default(now())
 }
+
+// Modelos para fluxos de WhatsApp
+
+model WhatsappFlow {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  active       Boolean    @default(true)
+  nodes        FlowNode[]
+  edges        FlowEdge[]
+  instanceName String? // Nome da instância do WhatsApp associada a este fluxo
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model FlowNode {
+  id          String       @id @default(uuid())
+  type        String // start, message, conditional, list, product, end
+  position    Json // { x: number, y: number }
+  data        Json // conteúdo específico do nó
+  flow        WhatsappFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowId      String
+  sourceEdges FlowEdge[]   @relation("SourceNode")
+  targetEdges FlowEdge[]   @relation("TargetNode")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model FlowEdge {
+  id           String       @id @default(uuid())
+  source       FlowNode     @relation("SourceNode", fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId     String
+  target       FlowNode     @relation("TargetNode", fields: [targetId], references: [id], onDelete: Cascade)
+  targetId     String
+  sourceHandle String? // Por exemplo, "yes", "no", "option-1"
+  flow         WhatsappFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowId       String
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}

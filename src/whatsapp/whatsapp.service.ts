@@ -74,12 +74,41 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.sockets.clear();
   }
 
-  async sendListMessage(listMessage: ListMessage, instanceName?: string) {
+  async sendMessage({
+    message,
+    instanceName,
+    to,
+  }: {
+    message: string;
+    instanceName?: string;
+    to?: string;
+  }): Promise<any> {
     try {
       // Usar a instância especificada ou a primeira disponível
       const targetInstance = instanceName || this.sockets.keys().next().value;
 
       return await fetch(
+        `http://${this.host}:${this.port}/message/sendText/${targetInstance}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: '429683C4C977415CAAFCCE10F7D57E11',
+          },
+          body: JSON.stringify({ text: message, number: to }),
+        },
+      ).then((data) => data.json());
+    } catch (e) {
+      console.error('❌ Erro ao enviar mensagem:', e);
+      return { success: false, error: e.message };
+    }
+  }
+
+  async sendListMessage(listMessage: ListMessage, instanceName?: string) {
+    try {
+      const targetInstance = instanceName || this.sockets.keys().next().value;
+
+      const data = await fetch(
         `http://${this.host}:${this.port}/message/sendList/${targetInstance}`,
         {
           method: 'POST',
@@ -90,6 +119,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           body: JSON.stringify(listMessage),
         },
       ).then((data) => data.json());
+      return data;
     } catch (e) {
       console.error('❌ Erro ao enviar mensagem:', e);
       return { success: false, error: e.message };
