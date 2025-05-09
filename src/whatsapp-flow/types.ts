@@ -28,6 +28,7 @@ export type ConditionalNodeData = {
 export type ListOption = {
   id: string;
   text: string;
+  description?: string;
 };
 
 export type ListNodeData = {

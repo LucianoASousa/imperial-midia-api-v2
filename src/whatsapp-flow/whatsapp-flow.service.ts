@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
 import {
@@ -12,6 +17,7 @@ import {
 export class WhatsappFlowService {
   constructor(
     private prisma: PrismaService,
+    @Inject(forwardRef(() => WhatsappService))
     private whatsappService: WhatsappService,
   ) {}
 
@@ -315,7 +321,7 @@ export class WhatsappFlowService {
           title: 'Opções disponíveis',
           rows: listData.options.map((option) => ({
             title: option.text,
-            description: 'a',
+            description: option.description || 'Sem descrição',
             rowId: option.id,
           })),
         },
