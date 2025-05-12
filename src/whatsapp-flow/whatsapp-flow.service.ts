@@ -74,17 +74,31 @@ export class WhatsappFlowService {
     // Verifica se a mensagem corresponde a alguma das respostas esperadas
     const lowerMessage = message.toLowerCase().trim();
 
-    // Para lidar melhor com nós do tipo lista, também consideramos o texto completo da opção
+    // Tratamento especial para respostas de lista (que podem incluir texto + descrição)
+    // Exemplo: "luciano\noiii" - precisamos verificar a primeira linha
+    const firstLineOfMessage = lowerMessage.split('\n')[0].trim();
+
     return !session.expectedResponses.some((response) => {
-      // Verifica correspondência exata
+      // Verifica correspondência exata (com mensagem completa)
       if (lowerMessage === response.toLowerCase()) {
+        return true;
+      }
+
+      // Verifica correspondência exata apenas com a primeira linha (para lidar com texto + descrição)
+      if (firstLineOfMessage === response.toLowerCase()) {
+        return true;
+      }
+
+      // Verifica se a mensagem começa com o texto da resposta esperada
+      // Isso captura casos onde a mensagem é "texto\ndescrição"
+      if (lowerMessage.startsWith(response.toLowerCase())) {
         return true;
       }
 
       // Verifica correspondência por regex
       try {
         const regex = new RegExp(response, 'i');
-        return regex.test(lowerMessage);
+        return regex.test(lowerMessage) || regex.test(firstLineOfMessage);
       } catch (error) {
         return false;
       }
@@ -92,10 +106,7 @@ export class WhatsappFlowService {
   }
 
   // Tratar resposta fora do contexto
-  private async handleOutOfContextResponse(
-    userId: string,
-    _message: string, // Prefixo com underscore para indicar que não é usado
-  ): Promise<boolean> {
+  private async handleOutOfContextResponse(userId: string): Promise<boolean> {
     const session = this.activeSessions.get(userId);
     if (!session) return false;
 
@@ -186,7 +197,7 @@ export class WhatsappFlowService {
 
     // Verificar se a mensagem está fora do contexto esperado
     if (this.isOutOfContextResponse(activeSession, message)) {
-      await this.handleOutOfContextResponse(userId, message);
+      await this.handleOutOfContextResponse(userId);
       return;
     }
 
@@ -469,6 +480,7 @@ export class WhatsappFlowService {
   async executeFlow(
     id: string,
     contactNumber: string,
+    message?: string,
   ): Promise<FlowExecutionResponse> {
     try {
       const flow = await this.getFlowById(id);
@@ -497,7 +509,10 @@ export class WhatsappFlowService {
         currentNodeId: startNode.id,
         expectedResponses: [],
         lastInteractionTime: new Date(),
-        context: {},
+        context: {
+          // Se houver uma mensagem inicial, armazenar no contexto
+          initialMessage: message || null,
+        },
         history: [
           {
             nodeId: startNode.id,
@@ -553,8 +568,8 @@ export class WhatsappFlowService {
 
     switch (node.type) {
       case 'start':
-        // Enviar mensagem de boas-vindas se houver
-        if (node.data.label) {
+        // Enviar mensagem de boas-vindas APENAS se houver uma label personalizada
+        if (node.data.label && node.data.label !== 'Início do Fluxo') {
           await this.whatsappService.sendMessage({
             to: userId,
             message: node.data.label,
@@ -683,11 +698,13 @@ export class WhatsappFlowService {
         break;
 
       case 'end':
-        // Nó final - encerrar o fluxo
-        await this.whatsappService.sendMessage({
-          to: userId,
-          message: node.data.label || 'Conversa finalizada. Obrigado!',
-        });
+        // Nó final - encerrar o fluxo, mas enviar mensagem APENAS se houver uma personalizada
+        if (node.data.label && node.data.label !== 'Fim do fluxo') {
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message: node.data.label,
+          });
+        }
 
         // Remover a sessão ativa
         this.activeSessions.delete(userId);

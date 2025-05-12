@@ -97,8 +97,9 @@ async function diagnoseFlow(flowId: string) {
       for (const listNode of listNodes) {
         console.log(`\nAnalisando nó de lista: ${listNode.id}`);
 
-        // Obter opções da lista
-        const options = listNode.data?.options || [];
+        // Obter opções da lista - corrigido o acesso às opções
+        const nodeData = listNode.data as any; // Cast para any para acessar options
+        const options = nodeData?.options || [];
         console.log(`- Opções configuradas: ${options.length}`);
 
         // Verificar conexões para cada opção
