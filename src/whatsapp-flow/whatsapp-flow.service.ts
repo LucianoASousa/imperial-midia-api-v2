@@ -13,17 +13,198 @@ import {
   WhatsappFlowData,
 } from './types';
 
+// Interface para rastreamento de sessões ativas
+interface ActiveSession {
+  userId: string; // ID do usuário (número de telefone)
+  flowId: string; // ID do fluxo em execução
+  currentNodeId: string; // ID do nó atual
+  expectedResponses: string[]; // Respostas esperadas (para validação)
+  lastInteractionTime: Date; // Hora da última interação
+  context: Record<string, any>; // Contexto da conversa (variáveis)
+  history: Array<{
+    // Histórico de nós visitados
+    nodeId: string;
+    timestamp: Date;
+  }>;
+}
+
 @Injectable()
 export class WhatsappFlowService {
+  // Armazenando sessões ativas em memória
+  private activeSessions: Map<string, ActiveSession> = new Map();
+  // Timeout para considerar uma sessão expirada (30 minutos)
+  private readonly SESSION_TIMEOUT = 30 * 60 * 1000;
+
   constructor(
-    private prisma: PrismaService,
+    private readonly prismaService: PrismaService,
     @Inject(forwardRef(() => WhatsappService))
-    private whatsappService: WhatsappService,
-  ) {}
+    private readonly whatsappService: WhatsappService,
+  ) {
+    // Iniciar limpeza periódica de sessões expiradas
+    setInterval(() => this.cleanExpiredSessions(), 5 * 60 * 1000);
+  }
+
+  // Limpeza de sessões expiradas
+  private cleanExpiredSessions() {
+    const now = new Date();
+    for (const [userId, session] of this.activeSessions.entries()) {
+      const elapsed = now.getTime() - session.lastInteractionTime.getTime();
+      if (elapsed > this.SESSION_TIMEOUT) {
+        // Envia mensagem informando que a sessão expirou
+        this.whatsappService.sendMessage({
+          to: userId,
+          message:
+            'Sua sessão expirou por inatividade. Para iniciar novamente, envie uma mensagem de ativação.',
+        });
+        this.activeSessions.delete(userId);
+      }
+    }
+  }
+
+  // Verificar se uma resposta está fora do contexto esperado
+  private isOutOfContextResponse(
+    session: ActiveSession,
+    message: string,
+  ): boolean {
+    // Se não houver respostas esperadas, qualquer resposta é válida
+    if (!session.expectedResponses || session.expectedResponses.length === 0) {
+      return false;
+    }
+
+    // Verifica se a mensagem corresponde a alguma das respostas esperadas
+    const lowerMessage = message.toLowerCase().trim();
+
+    // Para lidar melhor com nós do tipo lista, também consideramos o texto completo da opção
+    return !session.expectedResponses.some((response) => {
+      // Verifica correspondência exata
+      if (lowerMessage === response.toLowerCase()) {
+        return true;
+      }
+
+      // Verifica correspondência por regex
+      try {
+        const regex = new RegExp(response, 'i');
+        return regex.test(lowerMessage);
+      } catch (error) {
+        return false;
+      }
+    });
+  }
+
+  // Tratar resposta fora do contexto
+  private async handleOutOfContextResponse(
+    userId: string,
+    _message: string, // Prefixo com underscore para indicar que não é usado
+  ): Promise<boolean> {
+    const session = this.activeSessions.get(userId);
+    if (!session) return false;
+
+    // Pergunta se o usuário quer encerrar a conversa
+    await this.whatsappService.sendMessage({
+      to: userId,
+      message:
+        'Parece que sua resposta está fora do contexto esperado. Deseja encerrar esta conversa? (Responda com "sim" ou "não")',
+    });
+
+    // Salva o contexto atual, mas altera as respostas esperadas
+    this.activeSessions.set(userId, {
+      ...session,
+      expectedResponses: ['sim', 'não', 'nao', 'yes', 'no'],
+      lastInteractionTime: new Date(),
+      // Incluímos um marcador para indicar que estamos em um estado especial
+      context: {
+        ...session.context,
+        _handlingOutOfContext: true,
+        _previousNodeId: session.currentNodeId,
+      },
+    });
+
+    return true;
+  }
+
+  // Processa a resposta para mensagem fora do contexto
+  private async processOutOfContextDecision(
+    userId: string,
+    message: string,
+  ): Promise<boolean> {
+    const session = this.activeSessions.get(userId);
+    if (!session || !session.context._handlingOutOfContext) return false;
+
+    const lowerMessage = message.toLowerCase().trim();
+    const wantsToEnd = ['sim', 'yes', 's', 'y'].includes(lowerMessage);
+
+    if (wantsToEnd) {
+      // Usuário quer encerrar a conversa
+      await this.whatsappService.sendMessage({
+        to: userId,
+        message:
+          'Conversa encerrada. Obrigado por utilizar nosso serviço! Para iniciar novamente, envie uma mensagem de ativação.',
+      });
+      this.activeSessions.delete(userId);
+    } else {
+      // Usuário quer continuar de onde parou
+      const previousNodeId = session.context._previousNodeId as string; // Adicionar type assertion
+
+      // Remover marcadores especiais
+      const cleanContext = { ...session.context };
+      delete cleanContext._handlingOutOfContext;
+      delete cleanContext._previousNodeId;
+
+      // Restaurar sessão ao estado anterior
+      this.activeSessions.set(userId, {
+        ...session,
+        currentNodeId: previousNodeId,
+        context: cleanContext,
+        lastInteractionTime: new Date(),
+      });
+
+      await this.whatsappService.sendMessage({
+        to: userId,
+        message: 'Ok, vamos continuar de onde paramos.',
+      });
+
+      // Reprocessar o nó atual para continuar o fluxo
+      await this.processNode(userId, session.flowId, previousNodeId);
+    }
+
+    return true;
+  }
+
+  // Método para lidar com mensagens em uma sessão ativa
+  private async handleSessionMessage(
+    userId: string,
+    message: string,
+  ): Promise<void> {
+    const activeSession = this.activeSessions.get(userId);
+    if (!activeSession) return;
+
+    // Verificar se estamos tratando uma resposta para uma pergunta de "fora do contexto"
+    if (activeSession.context._handlingOutOfContext) {
+      await this.processOutOfContextDecision(userId, message);
+      return;
+    }
+
+    // Verificar se a mensagem está fora do contexto esperado
+    if (this.isOutOfContextResponse(activeSession, message)) {
+      await this.handleOutOfContextResponse(userId, message);
+      return;
+    }
+
+    // Atualizar hora da última interação
+    activeSession.lastInteractionTime = new Date();
+
+    // Processar a resposta para o nó atual
+    await this.processNodeResponse(
+      userId,
+      activeSession.flowId,
+      activeSession.currentNodeId,
+      message,
+    );
+  }
 
   async createFlow(createFlowDto: CreateFlowDto): Promise<WhatsappFlowData> {
     // Criar o fluxo base
-    const flow = await this.prisma.whatsappFlow.create({
+    const flow = await this.prismaService.whatsappFlow.create({
       data: {
         name: createFlowDto.name,
         description: createFlowDto.description,
@@ -34,7 +215,7 @@ export class WhatsappFlowService {
     // Criar os nós
     const createdNodes = await Promise.all(
       createFlowDto.nodes.map(async (node) => {
-        return await this.prisma.flowNode.create({
+        return await this.prismaService.flowNode.create({
           data: {
             type: node.type,
             position: node.position,
@@ -63,7 +244,7 @@ export class WhatsappFlowService {
           );
         }
 
-        return await this.prisma.flowEdge.create({
+        return await this.prismaService.flowEdge.create({
           data: {
             sourceId,
             targetId,
@@ -79,7 +260,7 @@ export class WhatsappFlowService {
   }
 
   async getAllFlows(): Promise<WhatsappFlowData[]> {
-    const flows = await this.prisma.whatsappFlow.findMany({
+    const flows = await this.prismaService.whatsappFlow.findMany({
       include: {
         nodes: true,
         edges: true,
@@ -90,7 +271,7 @@ export class WhatsappFlowService {
   }
 
   async getFlowById(id: string): Promise<WhatsappFlowData> {
-    const flow = await this.prisma.whatsappFlow.findUnique({
+    const flow = await this.prismaService.whatsappFlow.findUnique({
       where: { id },
       include: {
         nodes: true,
@@ -110,7 +291,7 @@ export class WhatsappFlowService {
     updateFlowDto: UpdateFlowDto,
   ): Promise<WhatsappFlowData> {
     // Verificar se o fluxo existe
-    const existingFlow = await this.prisma.whatsappFlow.findUnique({
+    const existingFlow = await this.prismaService.whatsappFlow.findUnique({
       where: { id },
     });
 
@@ -119,7 +300,7 @@ export class WhatsappFlowService {
     }
 
     // Atualizar dados básicos do fluxo
-    await this.prisma.whatsappFlow.update({
+    await this.prismaService.whatsappFlow.update({
       where: { id },
       data: {
         name: updateFlowDto.name ?? existingFlow.name,
@@ -132,14 +313,14 @@ export class WhatsappFlowService {
     // Se houver novos nós, primeiro remover os existentes e depois criar os novos
     if (updateFlowDto.nodes) {
       // Remover nós existentes (as arestas serão removidas em cascata conforme definido no schema)
-      await this.prisma.flowNode.deleteMany({
+      await this.prismaService.flowNode.deleteMany({
         where: { flowId: id },
       });
 
       // Criar os novos nós
       const createdNodes = await Promise.all(
         updateFlowDto.nodes.map(async (node) => {
-          return await this.prisma.flowNode.create({
+          return await this.prismaService.flowNode.create({
             data: {
               type: node.type,
               position: node.position,
@@ -169,7 +350,7 @@ export class WhatsappFlowService {
               );
             }
 
-            return await this.prisma.flowEdge.create({
+            return await this.prismaService.flowEdge.create({
               data: {
                 sourceId,
                 targetId,
@@ -187,7 +368,7 @@ export class WhatsappFlowService {
   }
 
   async deleteFlow(id: string): Promise<void> {
-    const flow = await this.prisma.whatsappFlow.findUnique({
+    const flow = await this.prismaService.whatsappFlow.findUnique({
       where: { id },
     });
 
@@ -196,94 +377,144 @@ export class WhatsappFlowService {
     }
 
     // Excluir o fluxo (nós e arestas serão excluídos em cascata)
-    await this.prisma.whatsappFlow.delete({
+    await this.prismaService.whatsappFlow.delete({
       where: { id },
     });
   }
 
+  // Método para processar mensagens recebidas
+  async processIncomingMessage(userId: string, message: string): Promise<void> {
+    // Verificar se já existe uma sessão ativa para este usuário
+    const activeSession = this.activeSessions.get(userId);
+
+    if (activeSession) {
+      // Já existe uma sessão ativa, processar a resposta
+      await this.handleSessionMessage(userId, message);
+    } else {
+      // Verificar se a mensagem é um gatilho para algum fluxo
+      const trigger = await this.findTriggerForMessage(message);
+      if (trigger) {
+        await this.executeFlow(trigger.flowId, userId, message);
+      } else {
+        // Alteração: Em vez de procurar especificamente o fluxo "Atendimento Automatizado",
+        // procurar qualquer fluxo ativo criado pelo usuário
+        try {
+          // Buscar qualquer fluxo ativo (privilegiando fluxos criados pelo usuário)
+          const defaultFlow = await this.prismaService.whatsappFlow.findFirst({
+            where: {
+              active: true,
+            },
+            orderBy: {
+              createdAt: 'desc', // Prioriza fluxos mais recentes (provavelmente criados pelo usuário)
+            },
+          });
+
+          if (defaultFlow) {
+            console.log(
+              `🤖 Iniciando fluxo padrão (${defaultFlow.name}) para mensagem não reconhecida: ${message}`,
+            );
+            await this.executeFlow(defaultFlow.id, userId, message);
+          } else {
+            // Nenhum fluxo ativo encontrado, usar resposta genérica
+            await this.whatsappService.sendMessage({
+              to: userId,
+              message:
+                'Olá! Não reconheci sua mensagem. Parece que não há fluxos ativos configurados no sistema.',
+            });
+          }
+        } catch (error) {
+          console.error('Erro ao iniciar fluxo padrão:', error);
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message:
+              'Desculpe, estamos enfrentando problemas técnicos. Por favor, tente novamente mais tarde.',
+          });
+        }
+      }
+    }
+  }
+
+  // Encontrar um gatilho para a mensagem recebida
+  private async findTriggerForMessage(
+    message: string,
+  ): Promise<{ flowId: string } | null> {
+    // Obter todos os gatilhos do serviço WhatsApp
+    const triggers = this.whatsappService.getFlowTriggers();
+
+    const lowerMessage = message.toLowerCase().trim();
+
+    for (const trigger of triggers) {
+      if (typeof trigger.keyword === 'string') {
+        // Gatilho de texto simples
+        if (lowerMessage === trigger.keyword.toLowerCase()) {
+          return { flowId: trigger.flowId };
+        }
+      } else {
+        // Gatilho de regex - usando string diretamente
+        try {
+          // Assumir que o valor já é um padrão regex válido como string
+          const regex = new RegExp(String(trigger.keyword), 'i');
+          if (regex.test(lowerMessage)) {
+            return { flowId: trigger.flowId };
+          }
+        } catch (error) {
+          console.error('Erro ao processar regex em gatilho:', error);
+        }
+      }
+    }
+
+    return null;
+  }
+
   async executeFlow(
-    flowId: string,
+    id: string,
     contactNumber: string,
   ): Promise<FlowExecutionResponse> {
     try {
-      // Obter o fluxo completo
-      const flow = await this.getFlowById(flowId);
-
-      if (!flow.instanceName) {
+      const flow = await this.getFlowById(id);
+      if (!flow) {
         return {
           success: false,
-          message: 'Este fluxo não possui uma instância de WhatsApp associada',
-          error: 'NO_INSTANCE',
+          message: `Fluxo com ID ${id} não encontrado`,
+          error: 'FLOW_NOT_FOUND',
         };
       }
 
-      // Encontrar o nó inicial (start)
+      // Encontrar o nó inicial
       const startNode = flow.nodes.find((node) => node.type === 'start');
       if (!startNode) {
         return {
           success: false,
-          message: 'Este fluxo não possui um nó inicial',
-          error: 'NO_START_NODE',
+          message: 'Nó de início não encontrado no fluxo',
+          error: 'START_NODE_NOT_FOUND',
         };
       }
 
-      // Encontrar o primeiro nó após o start
-      const outgoingEdges = flow.edges.filter(
-        (edge) => edge.source === startNode.id,
-      );
-      if (outgoingEdges.length === 0) {
-        return {
-          success: false,
-          message: 'Nó inicial não está conectado a nenhum outro nó',
-          error: 'NO_OUTGOING_EDGES',
-        };
-      }
+      // Iniciar uma nova sessão
+      this.activeSessions.set(contactNumber, {
+        userId: contactNumber,
+        flowId: id,
+        currentNodeId: startNode.id,
+        expectedResponses: [],
+        lastInteractionTime: new Date(),
+        context: {},
+        history: [
+          {
+            nodeId: startNode.id,
+            timestamp: new Date(),
+          },
+        ],
+      });
 
-      // Obter nó de destino
-      const nextNodeId = outgoingEdges[0].target;
-      const nextNode = flow.nodes.find((node) => node.id === nextNodeId);
-
-      // Processar o próximo nó
-      if (nextNode.type === 'message') {
-        // Enviar mensagem de texto
-        await this.sendTextMessage(
-          flow.instanceName,
-          contactNumber,
-          nextNode.data.label,
-        );
-
-        // Continuar processando o fluxo para o próximo nó após a mensagem
-        const nextEdges = flow.edges.filter(
-          (edge) => edge.source === nextNode.id,
-        );
-        const nextNodeIds = nextEdges.map((edge) => edge.target);
-
-        return {
-          success: true,
-          message: 'Mensagem enviada com sucesso',
-          currentNodeId: nextNode.id,
-          nextNodeIds,
-        };
-      } else if (nextNode.type === 'list') {
-        // Enviar mensagem com lista de opções
-        const listData = nextNode.data as any;
-        await this.sendListMessage(flow.instanceName, contactNumber, listData);
-
-        return {
-          success: true,
-          message: 'Lista de opções enviada com sucesso',
-          currentNodeId: nextNode.id,
-        };
-      }
+      // Processar o nó inicial
+      await this.processNode(contactNumber, id, startNode.id);
 
       return {
         success: true,
         message: 'Fluxo iniciado com sucesso',
         currentNodeId: startNode.id,
-        nextNodeIds: [nextNodeId],
       };
     } catch (error) {
-      console.error('Erro ao executar fluxo:', error);
       return {
         success: false,
         message: 'Erro ao executar o fluxo',
@@ -292,47 +523,284 @@ export class WhatsappFlowService {
     }
   }
 
-  private async sendTextMessage(
-    instanceName: string,
-    number: string,
-    text: string,
-  ): Promise<any> {
-    await this.whatsappService.sendMessage({
-      message: text,
-      instanceName,
-      to: number,
+  // Processar um nó do fluxo
+  private async processNode(
+    userId: string,
+    flowId: string,
+    nodeId: string,
+  ): Promise<void> {
+    const flow = await this.getFlowById(flowId);
+    const node = flow.nodes.find((n) => n.id === nodeId);
+
+    if (!node) {
+      await this.whatsappService.sendMessage({
+        to: userId,
+        message: 'Erro: Nó não encontrado no fluxo. A conversa será encerrada.',
+      });
+      this.activeSessions.delete(userId);
+      return;
+    }
+
+    const session = this.activeSessions.get(userId);
+    if (!session) return;
+
+    // Atualizar o nó atual na sessão
+    session.currentNodeId = nodeId;
+    session.history.push({
+      nodeId,
+      timestamp: new Date(),
     });
-    return { success: true };
+
+    switch (node.type) {
+      case 'start':
+        // Enviar mensagem de boas-vindas se houver
+        if (node.data.label) {
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message: node.data.label,
+          });
+        }
+
+        // Encontrar o próximo nó conectado ao nó inicial
+        const nextNodeAfterStart = this.findNextNode(flow, nodeId);
+        if (nextNodeAfterStart) {
+          await this.processNode(userId, flowId, nextNodeAfterStart);
+        } else {
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message: 'Fluxo incompleto. Não há nós conectados ao nó inicial.',
+          });
+          this.activeSessions.delete(userId);
+        }
+        break;
+
+      case 'message':
+        // Enviar a mensagem
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: node.data.label || 'Mensagem sem conteúdo',
+        });
+
+        // Verificar se o nó aguarda resposta
+        if (node.data.aguardaResposta) {
+          // Configurar as respostas esperadas com base nos gatilhos
+          if (node.data.gatilhos && node.data.gatilhos.length > 0) {
+            const expectedResponses = node.data.gatilhos
+              .filter((g) => g.tipo !== 'qualquer')
+              .map((g) => g.valor || '');
+
+            session.expectedResponses = expectedResponses;
+          } else {
+            // Se não há gatilhos específicos, aceitar qualquer resposta
+            session.expectedResponses = [];
+          }
+
+          // Não prosseguir automaticamente, aguardar resposta do usuário
+        } else {
+          // Não aguarda resposta, seguir para o próximo nó
+          const nextNode = this.findNextNode(flow, nodeId);
+          if (nextNode) {
+            await this.processNode(userId, flowId, nextNode);
+          } else {
+            // Fim do fluxo
+            await this.whatsappService.sendMessage({
+              to: userId,
+              message: 'Fim da conversa. Obrigado!',
+            });
+            this.activeSessions.delete(userId);
+          }
+        }
+        break;
+
+      case 'list':
+        // Enviar uma mensagem de lista com opções
+        const listData = node.data as any; // Tipo específico para nós de lista
+
+        if (listData.options && listData.options.length > 0) {
+          // Criar a mensagem de lista
+          const listMessage = {
+            number: userId,
+            title: 'Selecione uma opção',
+            description:
+              node.data.label || 'Por favor, escolha uma das opções abaixo:',
+            buttonText: 'Ver opções',
+            footerText: 'Imperial Mídia WhatsApp Flow',
+            sections: [
+              {
+                title: 'Opções disponíveis',
+                rows: listData.options.map((option) => ({
+                  title: option.text,
+                  description: option.description || '',
+                  rowId: option.id,
+                })),
+              },
+            ],
+          };
+
+          // Salvar as opções válidas como respostas esperadas
+          // Incluir tanto os IDs das opções quanto os textos das opções como respostas válidas
+          session.expectedResponses = [
+            ...listData.options.map((option) => option.id),
+            ...listData.options.map((option) => option.text),
+          ];
+
+          // Enviar a lista
+          await this.whatsappService.sendListMessage(listMessage);
+        } else {
+          // Lista sem opções, enviar mensagem de erro
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message: 'Erro: Lista de opções vazia.',
+          });
+
+          // Tentar prosseguir para o próximo nó
+          const nextNode = this.findNextNode(flow, nodeId);
+          if (nextNode) {
+            await this.processNode(userId, flowId, nextNode);
+          } else {
+            this.activeSessions.delete(userId);
+          }
+        }
+        break;
+
+      case 'conditional':
+        // Nó condicional - na implementação atual, processamos baseado nos gatilhos
+        // Como não temos uma resposta do usuário para avaliar, apenas mostramos a mensagem
+        // e aguardamos a resposta
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: node.data.label || 'Por favor, responda para prosseguir:',
+        });
+
+        // Configurar respostas esperadas com base nos gatilhos
+        if (node.data.gatilhos && node.data.gatilhos.length > 0) {
+          const expectedResponses = node.data.gatilhos
+            .filter((g) => g.tipo !== 'qualquer')
+            .map((g) => g.valor || '');
+
+          session.expectedResponses = expectedResponses;
+        }
+        break;
+
+      case 'end':
+        // Nó final - encerrar o fluxo
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: node.data.label || 'Conversa finalizada. Obrigado!',
+        });
+
+        // Remover a sessão ativa
+        this.activeSessions.delete(userId);
+        break;
+
+      default:
+        // Tipo de nó desconhecido
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: `Tipo de nó não suportado: ${node.type}`,
+        });
+
+        // Tentar prosseguir para o próximo nó
+        const nextNodeDefault = this.findNextNode(flow, nodeId);
+        if (nextNodeDefault) {
+          await this.processNode(userId, flowId, nextNodeDefault);
+        } else {
+          this.activeSessions.delete(userId);
+        }
+    }
   }
 
-  private async sendListMessage(
-    instanceName: string,
-    number: string,
-    listData: any,
-  ): Promise<any> {
-    const listMessage = {
-      number: number,
-      title: listData.label || 'Selecione uma opção',
-      description: 'Escolha uma das opções abaixo',
-      buttonText: 'Ver opções',
-      footerText: 'Imperial Mídia WhatsApp Flow',
-      sections: [
-        {
-          title: 'Opções disponíveis',
-          rows: listData.options.map((option) => ({
-            title: option.text,
-            description: option.description || 'Sem descrição',
-            rowId: option.id,
-          })),
-        },
-      ],
-    };
+  // Processar a resposta do usuário para um nó
+  private async processNodeResponse(
+    userId: string,
+    flowId: string,
+    nodeId: string,
+    userResponse: string,
+  ): Promise<void> {
+    const flow = await this.getFlowById(flowId);
+    const node = flow.nodes.find((n) => n.id === nodeId);
 
-    // Enviar a mensagem com lista usando o WhatsappService
-    return await this.whatsappService.sendListMessage(
-      listMessage,
-      instanceName,
-    );
+    if (!node || !flow) {
+      this.activeSessions.delete(userId);
+      return;
+    }
+
+    // Encontrar o próximo nó com base na resposta e nos gatilhos
+    let nextNodeId: string | null = null;
+
+    // Verificar gatilhos específicos do nó
+    if (node.data.gatilhos && node.data.gatilhos.length > 0) {
+      const lowerUserResponse = userResponse.toLowerCase().trim();
+
+      // Tentar encontrar um gatilho correspondente
+      for (const gatilho of node.data.gatilhos) {
+        if (gatilho.tipo === 'qualquer') {
+          // Gatilho que aceita qualquer resposta
+          nextNodeId = gatilho.proximoNoId || this.findNextNode(flow, nodeId);
+          break;
+        } else if (gatilho.tipo === 'texto' && gatilho.valor) {
+          // Gatilho de texto exato
+          if (lowerUserResponse === gatilho.valor.toLowerCase()) {
+            nextNodeId = gatilho.proximoNoId || this.findNextNode(flow, nodeId);
+
+            // Enviar resposta automática se configurada
+            if (gatilho.resposta) {
+              await this.whatsappService.sendMessage({
+                to: userId,
+                message: gatilho.resposta,
+              });
+            }
+            break;
+          }
+        } else if (gatilho.tipo === 'regex' && gatilho.valor) {
+          // Gatilho de regex
+          try {
+            const regex = new RegExp(gatilho.valor, 'i');
+            if (regex.test(lowerUserResponse)) {
+              nextNodeId =
+                gatilho.proximoNoId || this.findNextNode(flow, nodeId);
+
+              // Enviar resposta automática se configurada
+              if (gatilho.resposta) {
+                await this.whatsappService.sendMessage({
+                  to: userId,
+                  message: gatilho.resposta,
+                });
+              }
+              break;
+            }
+          } catch (error) {
+            // Erro na regex, ignorar este gatilho
+          }
+        }
+      }
+    }
+
+    // Se não encontrou por gatilhos, usar o próximo nó conectado
+    if (!nextNodeId) {
+      nextNodeId = this.findNextNode(flow, nodeId);
+    }
+
+    // Processar o próximo nó se encontrado
+    if (nextNodeId) {
+      await this.processNode(userId, flowId, nextNodeId);
+    } else {
+      // Fim do fluxo, sem próximo nó
+      await this.whatsappService.sendMessage({
+        to: userId,
+        message: 'Fim da conversa. Obrigado!',
+      });
+      this.activeSessions.delete(userId);
+    }
+  }
+
+  // Encontrar o próximo nó conectado
+  private findNextNode(
+    flow: WhatsappFlowData,
+    currentNodeId: string,
+  ): string | null {
+    const edge = flow.edges.find((e) => e.source === currentNodeId);
+    return edge ? edge.target : null;
   }
 
   // Método auxiliar para mapear o modelo do banco para o DTO

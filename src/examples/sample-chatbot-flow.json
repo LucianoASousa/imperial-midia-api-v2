@@ -1,0 +1,398 @@
+{
+  "name": "Atendimento Automatizado",
+  "description": "Fluxo de atendimento automático com tratamento de respostas fora de contexto",
+  "nodes": [
+    {
+      "id": "node_start",
+      "type": "start",
+      "position": {
+        "x": 100,
+        "y": 100
+      },
+      "data": {
+        "label": "Olá! Bem-vindo ao atendimento automatizado da Imperial Mídia. Como posso ajudar você hoje?"
+      }
+    },
+    {
+      "id": "node_menu_principal",
+      "type": "list",
+      "position": {
+        "x": 400,
+        "y": 100
+      },
+      "data": {
+        "label": "Por favor, escolha uma das opções abaixo:",
+        "aguardaResposta": true,
+        "tempoLimite": 300,
+        "options": [
+          {
+            "id": "opt_info",
+            "text": "Informações",
+            "description": "Obter informações sobre nossos serviços"
+          },
+          {
+            "id": "opt_suporte",
+            "text": "Suporte",
+            "description": "Solicitar suporte técnico"
+          },
+          {
+            "id": "opt_vendas",
+            "text": "Vendas",
+            "description": "Falar com um consultor de vendas"
+          }
+        ],
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "Informações",
+            "proximoNoId": "node_informacoes"
+          },
+          {
+            "tipo": "texto",
+            "valor": "Suporte",
+            "proximoNoId": "node_suporte"
+          },
+          {
+            "tipo": "texto",
+            "valor": "Vendas",
+            "proximoNoId": "node_vendas"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não entendi sua escolha. Vou mostrar o menu novamente.",
+            "proximoNoId": "node_menu_principal"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_informacoes",
+      "type": "message",
+      "position": {
+        "x": 200,
+        "y": 300
+      },
+      "data": {
+        "label": "A Imperial Mídia oferece soluções completas de automação para WhatsApp, incluindo chatbots, fluxos de atendimento e integração com sistemas empresariais. Nossos serviços ajudam a melhorar a comunicação com seus clientes e aumentar a eficiência do atendimento.",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "voltar",
+            "resposta": "Voltando ao menu principal.",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "regex",
+            "valor": "obrigad(o|a)",
+            "resposta": "Por nada! Estamos à disposição.",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "qualquer",
+            "proximoNoId": "node_perguntar_voltar"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_suporte",
+      "type": "message",
+      "position": {
+        "x": 400,
+        "y": 300
+      },
+      "data": {
+        "label": "Para suporte técnico, precisamos de algumas informações. Qual o problema que você está enfrentando?",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "voltar",
+            "resposta": "Voltando ao menu principal.",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "qualquer",
+            "proximoNoId": "node_suporte_confirmacao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_suporte_confirmacao",
+      "type": "message",
+      "position": {
+        "x": 400,
+        "y": 450
+      },
+      "data": {
+        "label": "Entendi seu problema. Um de nossos técnicos entrará em contato em breve. Há mais algo em que possamos ajudar?",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "sim",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "texto",
+            "valor": "não",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "texto",
+            "valor": "nao",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não entendi sua resposta. Por favor, responda com 'sim' ou 'não'.",
+            "proximoNoId": "node_suporte_confirmacao"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_vendas",
+      "type": "message",
+      "position": {
+        "x": 600,
+        "y": 300
+      },
+      "data": {
+        "label": "Obrigado pelo interesse em nossos produtos! Para melhor atendê-lo, precisamos saber qual serviço você tem interesse: 1) Chatbot, 2) Automação de marketing, ou 3) Integração com sistemas",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "1",
+            "resposta": "Ótima escolha! Nossos chatbots são altamente personalizáveis.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "texto",
+            "valor": "2",
+            "resposta": "Perfeito! Nossa automação de marketing pode aumentar significativamente suas conversões.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "texto",
+            "valor": "3",
+            "resposta": "Excelente! Nossas soluções de integração são compatíveis com a maioria dos sistemas empresariais.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "regex",
+            "valor": "chatbot|bot",
+            "resposta": "Ótima escolha! Nossos chatbots são altamente personalizáveis.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "regex",
+            "valor": "marketing|automação|automacao",
+            "resposta": "Perfeito! Nossa automação de marketing pode aumentar significativamente suas conversões.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "regex",
+            "valor": "integração|integracao|sistema",
+            "resposta": "Excelente! Nossas soluções de integração são compatíveis com a maioria dos sistemas empresariais.",
+            "proximoNoId": "node_vendas_contato"
+          },
+          {
+            "tipo": "texto",
+            "valor": "voltar",
+            "resposta": "Voltando ao menu principal.",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não entendi sua escolha. Por favor, responda com o número (1, 2 ou 3) ou o nome do serviço.",
+            "proximoNoId": "node_vendas"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_vendas_contato",
+      "type": "message",
+      "position": {
+        "x": 600,
+        "y": 450
+      },
+      "data": {
+        "label": "Poderia nos informar seu nome e email para que um de nossos consultores entre em contato?",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "regex",
+            "valor": ".*@.*\\..*",
+            "proximoNoId": "node_vendas_agradecimento"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não consegui identificar um email válido na sua resposta. Poderia informar novamente?",
+            "proximoNoId": "node_vendas_contato"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_vendas_agradecimento",
+      "type": "message",
+      "position": {
+        "x": 600,
+        "y": 600
+      },
+      "data": {
+        "label": "Obrigado pelas informações! Um de nossos consultores entrará em contato em breve. Deseja retornar ao menu principal?",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "sim",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "texto",
+            "valor": "não",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "texto",
+            "valor": "nao",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não entendi sua resposta. Por favor, responda com 'sim' ou 'não'.",
+            "proximoNoId": "node_vendas_agradecimento"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_perguntar_voltar",
+      "type": "message",
+      "position": {
+        "x": 200,
+        "y": 450
+      },
+      "data": {
+        "label": "Deseja voltar ao menu principal?",
+        "aguardaResposta": true,
+        "gatilhos": [
+          {
+            "tipo": "texto",
+            "valor": "sim",
+            "proximoNoId": "node_menu_principal"
+          },
+          {
+            "tipo": "texto",
+            "valor": "não",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "texto",
+            "valor": "nao",
+            "proximoNoId": "node_final"
+          },
+          {
+            "tipo": "qualquer",
+            "resposta": "Não entendi sua resposta. Por favor, responda com 'sim' ou 'não'.",
+            "proximoNoId": "node_perguntar_voltar"
+          }
+        ]
+      }
+    },
+    {
+      "id": "node_final",
+      "type": "end",
+      "position": {
+        "x": 400,
+        "y": 750
+      },
+      "data": {
+        "label": "Obrigado por utilizar nosso atendimento automatizado! Se precisar de ajuda novamente, é só enviar uma mensagem. Tenha um ótimo dia!"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_start_menu",
+      "source": "node_start",
+      "target": "node_menu_principal"
+    },
+    {
+      "id": "edge_menu_info",
+      "source": "node_menu_principal",
+      "target": "node_informacoes"
+    },
+    {
+      "id": "edge_menu_suporte",
+      "source": "node_menu_principal",
+      "target": "node_suporte"
+    },
+    {
+      "id": "edge_menu_vendas",
+      "source": "node_menu_principal",
+      "target": "node_vendas"
+    },
+    {
+      "id": "edge_info_perguntar",
+      "source": "node_informacoes",
+      "target": "node_perguntar_voltar"
+    },
+    {
+      "id": "edge_suporte_confirmacao",
+      "source": "node_suporte",
+      "target": "node_suporte_confirmacao"
+    },
+    {
+      "id": "edge_suporte_confirmacao_menu",
+      "source": "node_suporte_confirmacao",
+      "target": "node_menu_principal"
+    },
+    {
+      "id": "edge_suporte_confirmacao_final",
+      "source": "node_suporte_confirmacao",
+      "target": "node_final"
+    },
+    {
+      "id": "edge_vendas_contato",
+      "source": "node_vendas",
+      "target": "node_vendas_contato"
+    },
+    {
+      "id": "edge_vendas_contato_agradecimento",
+      "source": "node_vendas_contato",
+      "target": "node_vendas_agradecimento"
+    },
+    {
+      "id": "edge_vendas_agradecimento_menu",
+      "source": "node_vendas_agradecimento",
+      "target": "node_menu_principal"
+    },
+    {
+      "id": "edge_vendas_agradecimento_final",
+      "source": "node_vendas_agradecimento",
+      "target": "node_final"
+    },
+    {
+      "id": "edge_perguntar_voltar_menu",
+      "source": "node_perguntar_voltar",
+      "target": "node_menu_principal"
+    },
+    {
+      "id": "edge_perguntar_voltar_final",
+      "source": "node_perguntar_voltar",
+      "target": "node_final"
+    },
+    {
+      "id": "edge_info_final",
+      "source": "node_informacoes",
+      "target": "node_final"
+    }
+  ]
+}

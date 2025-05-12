@@ -20,22 +20,23 @@ model User {
 // Modelos para fluxos de WhatsApp
 
 model WhatsappFlow {
-  id           String     @id @default(uuid())
+  id           String            @id @default(uuid())
   name         String
   description  String?
-  active       Boolean    @default(true)
+  active       Boolean           @default(true)
   nodes        FlowNode[]
   edges        FlowEdge[]
+  triggers     WhatsappTrigger[] // Relação com gatilhos
   instanceName String? // Nome da instância do WhatsApp associada a este fluxo
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 }
 
 model FlowNode {
   id          String       @id @default(uuid())
   type        String // start, message, conditional, list, product, end
   position    Json // { x: number, y: number }
-  data        Json // conteúdo específico do nó
+  data        Json // conteúdo específico do nó, incluindo gatilhos, aguardaResposta, tempoLimite
   flow        WhatsappFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
   flowId      String
   sourceEdges FlowEdge[]   @relation("SourceNode")
@@ -55,4 +56,15 @@ model FlowEdge {
   flowId       String
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+}
+
+// Modelo para gatilhos do WhatsApp
+model WhatsappTrigger {
+  id           String       @id @default(uuid())
+  instanceName String       @default("default") // Nome da instância do WhatsApp
+  type         String // keyword, regex
+  value        String // Palavra-chave ou padrão regex
+  flow         WhatsappFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  flowId       String
+  createdAt    DateTime     @default(now())
 }

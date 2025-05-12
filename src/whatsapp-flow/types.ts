@@ -9,36 +9,46 @@ export type NodeBase = {
   position: Position;
 };
 
-// Tipos de nós específicos
-export type StartNodeData = {
-  label: string;
+// Novo tipo para Gatilhos de Nó
+export type NodeGatilho = {
+  tipo: 'texto' | 'regex' | 'qualquer'; // Tipo do gatilho
+  valor?: string; // Valor para "texto" ou "regex"
+  resposta?: string; // Resposta automática opcional do bot a este gatilho
+  proximoNoId?: string; // ID do próximo nó específico para este gatilho (opcional, para condicionais complexas)
 };
 
-export type MessageNodeData = {
-  label: string;
+// Dados base para todos os nós, incluindo os novos campos
+export type BaseNodeData = {
+  label: string; // Mantido para nós que o utilizam (Message, List, Conditional, End, Start)
+  gatilhos?: NodeGatilho[];
+  aguardaResposta?: boolean;
+  tempoLimite?: number; // Em segundos
 };
 
-export type ConditionalNodeData = {
-  label: string;
-  condition: string;
-  yesLabel: string;
-  noLabel: string;
+// Tipos de nós específicos atualizados
+export type StartNodeData = BaseNodeData & Record<string, never>; // Label já está em BaseNodeData
+
+export type MessageNodeData = BaseNodeData & Record<string, never>; // Label já está em BaseNodeData
+
+export type ConditionalNodeData = BaseNodeData & {
+  condition?: string; // Pode ser removido se a lógica condicional for gerenciada por gatilhos
+  yesLabel?: string; // Pode ser removido
+  noLabel?: string; // Pode ser removido
+  // A lógica de "yes"/"no" pode ser representada por dois gatilhos com `proximoNoId` diferentes
 };
 
 export type ListOption = {
   id: string;
   text: string;
   description?: string;
+  proximoNoId?: string; // Opcional: para onde esta opção da lista deve levar
 };
 
-export type ListNodeData = {
-  label: string;
+export type ListNodeData = BaseNodeData & {
   options: ListOption[];
 };
 
-export type EndNodeData = {
-  label: string;
-};
+export type EndNodeData = BaseNodeData & Record<string, never>; // Label já está em BaseNodeData
 
 // União de todos os tipos de dados
 export type NodeData =
@@ -50,6 +60,7 @@ export type NodeData =
 
 // Definições de nós completos
 export type FlowNode = NodeBase & {
+  // O campo data agora pode ser qualquer um dos NodeData, que já incluem BaseNodeData
   data: NodeData;
 };
 
