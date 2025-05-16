@@ -17,13 +17,13 @@ export type NodeGatilho = {
   proximoNoId?: string; // ID do próximo nó específico para este gatilho (opcional, para condicionais complexas)
 };
 
-// Dados base para todos os nós, incluindo os novos campos
-export type BaseNodeData = {
-  label: string; // Mantido para nós que o utilizam (Message, List, Conditional, End, Start)
-  gatilhos?: NodeGatilho[];
+// Interface para dados básicos de nós
+export interface BaseNodeData {
+  label?: string;
   aguardaResposta?: boolean;
-  tempoLimite?: number; // Em segundos
-};
+  tempoLimite?: number;
+  gatilhos?: NodeGatilho[];
+}
 
 // Tipos de nós específicos atualizados
 export type StartNodeData = BaseNodeData & Record<string, never>; // Label já está em BaseNodeData
@@ -110,3 +110,23 @@ export type FlowExecutionResponse = {
   nextNodeIds?: string[];
   error?: string;
 };
+
+// Tipos de nós no fluxo
+export type FlowNodeType =
+  | 'start'
+  | 'end'
+  | 'message'
+  | 'conditional'
+  | 'list'
+  | 'product'; // Adicionado novo tipo 'product'
+
+// Dados para nó do tipo produto
+export interface ProductNodeData extends BaseNodeData {
+  productId?: string; // ID do produto (opcional - pode ser definido dinamicamente)
+  providerName?: string; // Nome do provedor (opcional - pode ser definido dinamicamente)
+  showPrice?: boolean; // Se deve mostrar o preço
+  showDescription?: boolean; // Se deve mostrar a descrição
+  showImage?: boolean; // Se deve mostrar a imagem
+  addToCartButton?: boolean; // Se deve mostrar botão de adicionar ao carrinho
+  customText?: string; // Texto personalizado adicional
+}

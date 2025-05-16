@@ -6,11 +6,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsappService } from '../whatsapp/whatsapp.service';
+import { ProductsService } from '../products/products.service';
 import {
   CreateFlowDto,
   FlowExecutionResponse,
   UpdateFlowDto,
   WhatsappFlowData,
+  ProductNodeData,
+  FlowNode,
 } from './types';
 
 // Interface para rastreamento de sessões ativas
@@ -39,6 +42,7 @@ export class WhatsappFlowService {
     private readonly prismaService: PrismaService,
     @Inject(forwardRef(() => WhatsappService))
     private readonly whatsappService: WhatsappService,
+    private readonly productsService: ProductsService,
   ) {
     // Iniciar limpeza periódica de sessões expiradas
     setInterval(() => this.cleanExpiredSessions(), 5 * 60 * 1000);
@@ -230,7 +234,7 @@ export class WhatsappFlowService {
           data: {
             type: node.type,
             position: node.position,
-            data: node.data,
+            data: node.data as any,
             flowId: flow.id,
           },
         });
@@ -335,7 +339,7 @@ export class WhatsappFlowService {
             data: {
               type: node.type,
               position: node.position,
-              data: node.data,
+              data: node.data as any,
               flowId: id,
             },
           });
@@ -678,6 +682,10 @@ export class WhatsappFlowService {
         }
         break;
 
+      case 'product':
+        await this.processProductNode(userId, node, session);
+        break;
+
       case 'conditional':
         // Nó condicional - na implementação atual, processamos baseado nos gatilhos
         // Como não temos uma resposta do usuário para avaliar, apenas mostramos a mensagem
@@ -846,5 +854,110 @@ export class WhatsappFlowService {
       edges,
       instanceName: flow.instanceName,
     };
+  }
+
+  // Adicionar o método para processar o nó do tipo produto
+  private async processProductNode(
+    userId: string,
+    node: FlowNode,
+    session: ActiveSession,
+  ): Promise<void> {
+    try {
+      // Extrair dados do nó de produto
+      const productNodeData = node.data as ProductNodeData;
+
+      // Se não há ID de produto definido, enviar mensagem de erro e avançar
+      if (!productNodeData.productId) {
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: 'Produto não configurado corretamente.',
+        });
+
+        // Tentar avançar para o próximo nó
+        const flow = await this.getFlowById(session.flowId);
+        const nextNode = this.findNextNode(flow, node.id);
+        if (nextNode) {
+          await this.processNode(userId, session.flowId, nextNode);
+        }
+        return;
+      }
+
+      try {
+        // Buscar o produto pelo ID
+        const product = await this.productsService.getProductById(
+          productNodeData.productId,
+        );
+
+        // Preparar a mensagem do produto
+        let productMessage = `*${product.name}*\n\n`;
+
+        if (productNodeData.showDescription !== false && product.description) {
+          productMessage += `${product.description}\n\n`;
+        }
+
+        if (productNodeData.showPrice !== false && product.price) {
+          productMessage += `*Preço:* R$ ${product.price.toFixed(2)}\n\n`;
+        }
+
+        if (productNodeData.customText) {
+          productMessage += `${productNodeData.customText}\n\n`;
+        }
+
+        // Enviar a mensagem do produto
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: productMessage,
+        });
+
+        // Se há uma imagem e está configurado para mostrar
+        if (productNodeData.showImage !== false && product.imageUrl) {
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message: product.imageUrl,
+          });
+        }
+
+        // Se está configurado para mostrar botão de adicionar ao carrinho
+        if (productNodeData.addToCartButton) {
+          // Aqui poderia implementar botões ou outras ações específicas
+          // Por enquanto, apenas simulando com uma mensagem
+          await this.whatsappService.sendMessage({
+            to: userId,
+            message:
+              "Para adicionar este produto ao carrinho, responda com 'adicionar'.",
+          });
+
+          // Configurar resposta esperada para adicionar ao carrinho
+          session.expectedResponses = ['adicionar', 'comprar', 'quero'];
+          return;
+        }
+
+        // Se não requer interação, avançar para o próximo nó
+        const flow = await this.getFlowById(session.flowId);
+        const nextNode = this.findNextNode(flow, node.id);
+        if (nextNode) {
+          await this.processNode(userId, session.flowId, nextNode);
+        }
+      } catch (error) {
+        console.error('Erro ao processar produto:', error);
+        await this.whatsappService.sendMessage({
+          to: userId,
+          message: 'Não foi possível obter informações do produto solicitado.',
+        });
+
+        // Mesmo com erro, tentamos avançar para o próximo nó
+        const flow = await this.getFlowById(session.flowId);
+        const nextNode = this.findNextNode(flow, node.id);
+        if (nextNode) {
+          await this.processNode(userId, session.flowId, nextNode);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao processar nó de produto:', error);
+      await this.whatsappService.sendMessage({
+        to: userId,
+        message: 'Ocorreu um erro ao processar o produto.',
+      });
+    }
   }
 }
